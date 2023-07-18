@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2018"
 authors = ["Rostylav Lesovyi <www.matrix.dev@gmail.com>"]
 description = "Factory for creation of circular refcounted dependencies"
+repository = "https://github.com/MatrixDev/rs-maybe-rc"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
