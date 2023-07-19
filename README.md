@@ -26,17 +26,31 @@ async fn new() -> Option<Rc<Self>> {
 
     let weak = maybe_rc.downgrade();
     let child = Child::new(weak).await?;
-    let this = Self {
-        child,
-    };
     
-    Some(maybe_rc.materialize(this))
+    Some(maybe_rc.materialize(Self {
+        child,
+    }))
 }
 ```
 
-## Assumptions
+Same approach can be used for `Arc` types with `MaybeArc` implementation:
+```rust
+async fn new() -> Option<Arc<Self>> {
+    let maybe_arc = MaybeArc::<Self>::new();
 
-In order to provide this behaviour `MaybeRc` makes two assumptions:
+    let weak = maybe_arc.downgrade();
+    let child = Child::new(weak).await?;
+
+    Some(maybe_arc.materialize(Self {
+        child,
+    }))
+}
+```
+## Unsafe Assumptions
+
+Under the hood `MaybeRc` and `MaybeArc`  use some unsafe magic to implement this behavior.
+Unfortunately, because standard library doesn't expose `Rc`/`Arc` internals, this magic
+must rely on two assumptions:
 1. `Rc<T>` and `Weak<T>` have the same content
 2. All `Rc<T>` for the same allocation hold a single weak count until dropped 
 
