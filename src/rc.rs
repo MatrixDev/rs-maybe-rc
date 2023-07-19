@@ -62,8 +62,10 @@ impl<T> MaybeRc<T> {
     /// Upgrading this `Weak<T>` reference will fail and result in a None unless
     /// it is called after `MaybeRc<T>::materialize` finishes.
     pub fn downgrade(&self) -> Weak<T> {
+        // SAFETY: `UnsafeCell` with `MaybeUninit` are [repr(transparent)] so they
+        // can be `stripped` down as memory layout should be the same
         unsafe {
-            std::mem::transmute(self.weak.clone())
+            Weak::from_raw(self.weak.clone().into_raw().cast())
         }
     }
 
@@ -71,7 +73,7 @@ impl<T> MaybeRc<T> {
     ///
     /// All `Weak<T>` references can be upgraded after this method finishes.
     pub fn materialize(self, value: T) -> Rc<T> {
-        let ptr = self.weak.as_ptr();
+        let ptr = self.weak.into_raw();
 
         // SAFETY: we know that memory is still allocated because of the weak
         // reference and no one can have access to it without unsafe code because
@@ -89,26 +91,12 @@ impl<T> MaybeRc<T> {
             Rc::increment_strong_count(ptr);
         }
 
-        // weak cannot fail here unless someone used unsafe from outside.
-        // this will increment strong counter to 2
-        let rc = self.weak.upgrade().unwrap();
-
-        // forget weak so it doesn't decrement weak counter.
-        // ASSUMPTION: unless std implementation changes all strong references
-        // also collectively "hold" exactly 1 weak reference counter
-        std::mem::forget(self.weak);
-
-        // SAFETY: we hold a strong reference so content is allocated
+        // SAFETY: `UnsafeCell` with `MaybeUninit` are [repr(transparent)] so they
+        // can be `stripped` down as memory layout should be the same
         unsafe {
-            // decrement strong counter back to 1 after upgrading weak reference
-            Rc::decrement_strong_count(ptr);
-        }
-
-        // SAFETY: both UnsafeCell and MaybeUninit are repr(transparent) and
-        // they can be safely stripped. MaybeUninit content was just initialized so we
-        // can guarantee it is valid
-        unsafe {
-            std::mem::transmute(rc)
+            // we can consume Weak and make Rc from it because
+            // at this point strong = 1 and weak = 1
+            Rc::from_raw(ptr.cast())
         }
     }
 }
@@ -122,6 +110,14 @@ impl<T> Default for MaybeRc<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_check_value() {
+        let maybe = MaybeRc::<usize>::new();
+        let rc = maybe.materialize(42);
+
+        assert_eq!(*rc, 42, "value is not what was provided");
+    }
 
     #[test]
     fn test_drop_init() {
