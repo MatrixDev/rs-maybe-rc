@@ -83,7 +83,7 @@ impl<T> MaybeArc<T> {
         }
 
         // SAFETY: we hold a weak reference so content is still allocated
-        // ASSUMPTION: we can restore `Arc` from strong count of 1
+        // ASSUMPTION: we can restore `Arc` from strong count of 0
         unsafe {
             // increment strong count to 1, so weak can be upgraded
             Arc::increment_strong_count(ptr);
