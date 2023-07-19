@@ -50,9 +50,11 @@ pub struct MaybeRc<T> {
 impl<T> MaybeRc<T> {
     /// Constructs a new `MaybeRc<T>`.
     pub fn new() -> Self {
+        // allocate Rc (strong = 1, weak = 1)
         let strong = Rc::new(UnsafeCell::new(MaybeUninit::uninit()));
-        let weak = Rc::downgrade(&strong);
-        Self { weak }
+        // create Weak (strong = 1, weak = 2)
+        Self { weak: Rc::downgrade(&strong) }
+        // drop Rc (strong = 0, weak = 1)
     }
 
     /// Creates a new `Weak<T>` pointer to this allocation.
@@ -80,19 +82,33 @@ impl<T> MaybeRc<T> {
             maybe_uninit.write(value);
         }
 
-        // SAFETY: memory is still held by the weak reference so we can increment
-        // strong counter
+        // SAFETY: we hold a weak reference so content is still allocated
+        // ASSUMPTION: we can restore `Rc` from strong count of 1
         unsafe {
+            // increment strong count to 1, so weak can be upgraded
             Rc::increment_strong_count(ptr);
         }
 
-        // SAFETY: we can transmute safely (unless std changes) weak into rc because:
-        // 1. their layout is the same
-        // 2. strong ref count was just incremented
-        // 3. weak counter must always be a at least 1 and we can guaranty that this
-        //    will be the only Rc constructed for this allocation (look at Rc::Drop)
+        // weak cannot fail here unless someone used unsafe from outside.
+        // this will increment strong counter to 2
+        let rc = self.weak.upgrade().unwrap();
+
+        // forget weak so it doesn't decrement weak counter.
+        // ASSUMPTION: unless std implementation changes all strong references
+        // also collectively "hold" exactly 1 weak reference counter
+        std::mem::forget(self.weak);
+
+        // SAFETY: we hold a strong reference so content is allocated
         unsafe {
-            std::mem::transmute(self.weak)
+            // decrement strong counter back to 1 after upgrading weak reference
+            Rc::decrement_strong_count(ptr);
+        }
+
+        // SAFETY: both UnsafeCell and MaybeUninit are repr(transparent) and
+        // they can be safely stripped. MaybeUninit content was just initialized so we
+        // can guarantee it is valid
+        unsafe {
+            std::mem::transmute(rc)
         }
     }
 }

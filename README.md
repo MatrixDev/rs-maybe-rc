@@ -48,10 +48,9 @@ async fn new() -> Option<Arc<Self>> {
 ```
 ## Unsafe Assumptions
 
-Under the hood `MaybeRc` and `MaybeArc`  use some unsafe magic to implement this behavior.
-Unfortunately, because standard library doesn't expose `Rc`/`Arc` internals, this magic
-must rely on two assumptions:
-1. `Rc<T>` and `Weak<T>` have the same content
-2. All `Rc<T>` for the same allocation hold a single weak count until dropped 
+Under the hood `MaybeRc` and `MaybeArc`  use some unsafe *magic* to implement this behavior.
+This *magic* makes some assumptions:
+1. all strong references collectively "hold" a single weak reference count
+2. we can restore strong reference even when strong counter is zero by calling `increment_strong_count`
 
 Unless these assumptions are broken library will behave correctly.
