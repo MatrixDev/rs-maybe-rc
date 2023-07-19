@@ -1,4 +1,3 @@
-use std::cell::UnsafeCell;
 use std::mem::MaybeUninit;
 use std::rc::{Rc, Weak};
 
@@ -44,17 +43,21 @@ use std::rc::{Rc, Weak};
 /// }
 /// ```
 pub struct MaybeRc<T> {
-    weak: Weak<UnsafeCell<MaybeUninit<T>>>,
+    weak: Weak<T>,
 }
 
 impl<T> MaybeRc<T> {
     /// Constructs a new `MaybeRc<T>`.
     pub fn new() -> Self {
-        // allocate Rc (strong = 1, weak = 1)
-        let strong = Rc::new(UnsafeCell::new(MaybeUninit::uninit()));
-        // create Weak (strong = 1, weak = 2)
-        Self { weak: Rc::downgrade(&strong) }
-        // drop Rc (strong = 0, weak = 1)
+        let strong = Rc::new(MaybeUninit::<T>::uninit());
+
+        // SAFETY: `MaybeUninit` is [repr(transparent)] so it can
+        // be `stripped` down as memory layout should be the same
+        let weak = unsafe {
+            Weak::from_raw(Rc::downgrade(&strong).into_raw().cast())
+        };
+
+        Self { weak }
     }
 
     /// Creates a new `Weak<T>` pointer to this allocation.
@@ -62,11 +65,7 @@ impl<T> MaybeRc<T> {
     /// Upgrading this `Weak<T>` reference will fail and result in a None unless
     /// it is called after `MaybeRc<T>::materialize` finishes.
     pub fn downgrade(&self) -> Weak<T> {
-        // SAFETY: `UnsafeCell` with `MaybeUninit` are [repr(transparent)] so they
-        // can be `stripped` down as memory layout should be the same
-        unsafe {
-            Weak::from_raw(self.weak.clone().into_raw().cast())
-        }
+        self.weak.clone()
     }
 
     /// Materialize this allocation to a fully-contructed `Rc<T>`.
@@ -75,13 +74,10 @@ impl<T> MaybeRc<T> {
     pub fn materialize(self, value: T) -> Rc<T> {
         let ptr = self.weak.into_raw();
 
-        // SAFETY: we know that memory is still allocated because of the weak
-        // reference and no one can have access to it without unsafe code because
-        // weak is non-upgradable at this point
+        // SAFETY: this value was not initialized before so
+        // we need to update it without dropping the old value
         unsafe {
-            let maybe_uninit = (*ptr).get();
-            let maybe_uninit = &mut *maybe_uninit;
-            maybe_uninit.write(value);
+            std::ptr::write(ptr.cast_mut(), value);
         }
 
         // SAFETY: we hold a weak reference so content is still allocated
@@ -91,7 +87,7 @@ impl<T> MaybeRc<T> {
             Rc::increment_strong_count(ptr);
         }
 
-        // SAFETY: `UnsafeCell` with `MaybeUninit` are [repr(transparent)] so they
+        // SAFETY: `UnsafeCell` with `MaybeUninit` are `#[repr(transparent)]` so they
         // can be `stripped` down as memory layout should be the same
         unsafe {
             // we can consume Weak and make Rc from it because
